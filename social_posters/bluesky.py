@@ -137,6 +137,9 @@ class PosterBluesky(SocialPoster):
         if pet.pet_id:
             text += f"\n\nPet ID: {pet.pet_id}"
 
+        if pet.adoption_url:
+            text += f"\n\nLearn more and adopt me: {pet.adoption_url}"
+
         species_tag = "DogsOfBluesky" if pet.species == "dog" else "CatsOfBluesky"
         tags = ["AdoptDontShop", "Boston", species_tag]
 
@@ -164,6 +167,17 @@ class PosterBluesky(SocialPoster):
 
         # Compute byte offsets (AT Protocol facets use UTF-8 byte positions).
         encoded = full_text.encode("utf-8")
+
+        # Add link facet for adoption URL.
+        if post.link:
+            link_bytes = post.link.encode("utf-8")
+            idx = encoded.find(link_bytes)
+            if idx != -1:
+                facets.append({
+                    "index": {"byteStart": idx, "byteEnd": idx + len(link_bytes)},
+                    "features": [{"$type": "app.bsky.richtext.facet#link", "uri": post.link}],
+                })
+
         search_from = 0
         for tag_str in tag_strings:
             tag_bytes = tag_str.encode("utf-8")

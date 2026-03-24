@@ -9,8 +9,6 @@ import logging
 import os
 import re
 from typing import Iterator
-import json
-
 import requests
 
 from abstractions import AdoptablePet, PetSource
@@ -66,7 +64,7 @@ class SourceRescueGroups(PetSource):
         
         url = (
             f"{self.BASE_URL}/available/{self.species}/haspic"
-            f"?include=breeds,locations"
+            f"?include=orgs,breeds,locations"
             f"&sort=random"
             f"&limit={self.limit}"
         )
@@ -74,15 +72,14 @@ class SourceRescueGroups(PetSource):
             "Content-Type": "application/vnd.api+json",
             "Authorization": self._api_key,
         }
-        payload = json.dumps({
+        payload = {
             "data": {
                 "filterRadius": {
                     "miles": self.radius_miles,
                     "postalcode": self.postal_code,
                 }
             }
-        })
-
+        }
 
         logger.info(
             f"Fetching {self.species} from RescueGroups within {self.radius_miles} miles of {self.postal_code}"
@@ -91,16 +88,22 @@ class SourceRescueGroups(PetSource):
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         response.raise_for_status()
 
-        data = response.json().get("data", [])
-        print(data)
+        body = response.json()
+        data = body.get("data", [])
         logger.info(f"Received {len(data)} pets from RescueGroups")
 
+        orgs_by_id = {
+            item["id"]: item.get("attributes", {})
+            for item in body.get("included", [])
+            if item.get("type") == "orgs"
+        }
+
         for animal in data:
-            pet = self._parse_animal(animal)
+            pet = self._parse_animal(animal, orgs_by_id)
             if pet:
                 yield pet
 
-    def _parse_animal(self, animal: dict) -> AdoptablePet | None:
+    def _parse_animal(self, animal: dict, orgs_by_id: dict) -> AdoptablePet | None:
         """Parse a single animal record from the API response."""
         try:
             attrs = animal.get("attributes", {})
@@ -118,9 +121,19 @@ class SourceRescueGroups(PetSource):
             # Clean up description (use text version, not HTML)
             description = self._clean_description(attrs.get("descriptionText", ""))
 
-            # Build adoption URL from slug
-            slug = attrs.get("slug", "")
-            adoption_url = f"https://www.rescuegroups.org/pet/{slug}" if slug else None
+            # Get adoptionUrl from the related org via relationships -> included
+            org_id = (
+                animal.get("relationships", {})
+                .get("orgs", {})
+                .get("data", [{}])[0]
+                .get("id")
+            )
+            org_attrs = orgs_by_id.get(org_id, {}) if org_id else {}
+            adoption_url = next(
+                (u for u in (org_attrs.get("adoptionUrl"), org_attrs.get("url"))
+                 if u and u.strip().rstrip("/") not in ("http:", "https:", "http://", "https://")),
+                None
+            )
 
             # Get best available image
             image_url = self._get_image_url(attrs)
