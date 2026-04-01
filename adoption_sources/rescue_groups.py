@@ -142,7 +142,7 @@ class SourceRescueGroups(PetSource):
                 name=name,
                 species=species,
                 breed=breed,
-                location=self.location_label,
+                location=", ".join(filter(None, [org_attrs.get("city"), org_attrs.get("state")])) or self.location_label,
                 description=description,
                 adoption_url=adoption_url,
                 image_url=image_url,
